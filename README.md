@@ -74,7 +74,7 @@ docker run -p 8080:8080 --env-file .env g4-app
 ## 📖 API Documentation
 
 Interactive API documentation (Swagger UI) is available at:
-`http://localhost:8080/swagger/index.html`
+`https://g4-sign-up-api.onrender.com/swagger/index.html`
 
 Use this to explore endpoints, request formats, and test the API.
 
