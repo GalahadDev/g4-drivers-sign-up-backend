@@ -1,0 +1,230 @@
+package drivers
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"g4-services/api/config"
+	"g4-services/api/database"
+	storage "g4-services/api/services"
+	"g4-services/api/services/email"
+)
+
+// RegisterDriver godoc
+// @Summary      Register as Driver
+// @Description  Submit driver application with documents and photos
+// @Tags         drivers
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        full_name            formData  string  true  "Full Name"
+// @Param        address              formData  string  true  "Address"
+// @Param        phone_number         formData  string  true  "Phone Number"
+// @Param        emergency_number     formData  string  true  "Emergency Contact"
+// @Param        device_type          formData  string  true  "Device Type (phone/tablet)"
+// @Param        vehicle_type         formData  string  true  "Vehicle Type"
+// @Param        passenger_capacity   formData  int     true  "Passenger Capacity"
+// @Param        driver_category      formData  string  true  "Category (comfort/luxury)"
+// @Param        driver_license       formData  file    true  "Driver's License"
+// @Param        tlc_license          formData  file    true  "TLC License"
+// @Param        car_registration     formData  file    true  "Car Registration"
+// @Param        vehicle_inspection   formData  file    true  "Vehicle Inspection"
+// @Param        tlc_diamond          formData  file    true  "TLC Diamond"
+// @Param        profile_photo        formData  file    false "Profile Photo"
+// @Param        vehicle_photos       formData  file    true  "Vehicle Photos (Array)"
+// @Param        insurance_files      formData  file    true  "Insurance Files (Array)"
+// @Param        additional_info      formData  string  false "JSON String with extras"
+// @Success      201  {string}  string "{"status":"success"}"
+// @Failure      400  {string}  string "Bad Request"
+// @Failure      500  {string}  string "Server Error"
+// @Router       /drivers/register [post]
+// @Security     BearerAuth
+func RegisterDriver(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "File too large or invalid format", http.StatusBadRequest)
+		return
+	}
+
+	cfg, _ := config.Load()
+	userID, ok := r.Context().Value("user_id").(string)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	fullName := strings.TrimSpace(r.FormValue("full_name"))
+	address := strings.TrimSpace(r.FormValue("address"))
+	phoneNumber := strings.TrimSpace(r.FormValue("phone_number"))
+	emergencyNumber := strings.TrimSpace(r.FormValue("emergency_number"))
+	deviceType := strings.TrimSpace(r.FormValue("device_type"))
+	vehicleType := strings.TrimSpace(r.FormValue("vehicle_type"))
+	driverCategory := strings.TrimSpace(r.FormValue("driver_category"))
+
+	// Validación de campos de texto obligatorios
+	if fullName == "" || address == "" || phoneNumber == "" || emergencyNumber == "" ||
+		deviceType == "" || vehicleType == "" {
+		http.Error(w, "Missing required text fields (name, address, phone, vehicle info)", http.StatusBadRequest)
+		return
+	}
+
+	// Validación de Capacidad (Debe ser número y mayor a 0)
+	passengerCapacity, err := strconv.Atoi(r.FormValue("passenger_capacity"))
+	if err != nil || passengerCapacity <= 0 {
+		http.Error(w, "Invalid passenger capacity", http.StatusBadRequest)
+		return
+	}
+
+	// Validación de Categoría
+	if driverCategory != "comfort" && driverCategory != "luxury" {
+		http.Error(w, "Invalid category. Must be 'comfort' or 'luxury'", http.StatusBadRequest)
+		return
+	}
+
+	uploadRequired := func(formKey string) (string, error) {
+		file, header, err := r.FormFile(formKey)
+		if err != nil {
+			return "", fmt.Errorf("missing required file: %s", formKey)
+		}
+		defer file.Close()
+
+		url, err := storage.UploadFile(file, header, "docs", cfg)
+		if err != nil {
+			return "", fmt.Errorf("upload failed for %s: %v", formKey, err)
+		}
+		return url, nil
+	}
+
+	uploadOptional := func(formKey string) string {
+		file, header, err := r.FormFile(formKey)
+		if err != nil {
+			return "" // No pasa nada si no existe
+		}
+		defer file.Close()
+
+		url, err := storage.UploadFile(file, header, "avatars", cfg)
+		if err != nil {
+			slog.Error("Optional upload failed", "key", formKey, "error", err)
+			return ""
+		}
+		return url
+	}
+
+	var driverLicenseURL, tlcLicenseURL, carRegistrationURL, vehicleInspectionURL, tlcDiamondURL string
+
+	if driverLicenseURL, err = uploadRequired("driver_license"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if tlcLicenseURL, err = uploadRequired("tlc_license"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if carRegistrationURL, err = uploadRequired("car_registration"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if vehicleInspectionURL, err = uploadRequired("vehicle_inspection"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if tlcDiamondURL, err = uploadRequired("tlc_diamond"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	profilePhotoURL := uploadOptional("profile_photo")
+
+	uploadMultipleRequired := func(formKey string, folder string) ([]string, error) {
+		var urls []string
+		files := r.MultipartForm.File[formKey]
+
+		if len(files) == 0 {
+			return nil, fmt.Errorf("missing required files list: %s", formKey)
+		}
+
+		for _, fileHeader := range files {
+			file, err := fileHeader.Open()
+			if err == nil {
+				url, err := storage.UploadFile(file, fileHeader, folder, cfg)
+				if err == nil {
+					urls = append(urls, url)
+				}
+				file.Close()
+			}
+		}
+
+		if len(urls) == 0 {
+			return nil, fmt.Errorf("failed to upload any files for: %s", formKey)
+		}
+		return urls, nil
+	}
+
+	vehiclePhotosURLs, err := uploadMultipleRequired("vehicle_photos", "vehicles")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	insuranceFilesURLs, err := uploadMultipleRequired("insurance_files", "docs")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	additionalInfoStr := r.FormValue("additional_info")
+	if additionalInfoStr == "" {
+		additionalInfoStr = "{}"
+	}
+
+	status := "approved"
+
+	sql := `
+		INSERT INTO driver_applications (
+			user_id, full_name, address, phone_number, emergency_number, device_type,
+			vehicle_type, passenger_capacity, driver_category,
+			driver_license_url, tlc_license_url, car_registration_url,
+			vehicle_inspection_url, tlc_diamond_url, insurance_files_urls,
+			profile_photo_url, vehicle_photos_urls, additional_info,
+			status
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 
+			NULLIF($16, ''), 
+			$17, $18::jsonb,
+			$19
+		) RETURNING id`
+
+	var newID string
+	err = database.Pool.QueryRow(r.Context(), sql,
+		userID, fullName, address, phoneNumber, emergencyNumber, deviceType,
+		vehicleType, passengerCapacity, driverCategory,
+		driverLicenseURL, tlcLicenseURL, carRegistrationURL,
+		vehicleInspectionURL, tlcDiamondURL, insuranceFilesURLs,
+		profilePhotoURL, vehiclePhotosURLs,
+		additionalInfoStr,
+		status,
+	).Scan(&newID)
+
+	if err != nil {
+		slog.Error("Failed to insert application", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	go func() {
+		var emailTo string
+		if err := database.Pool.QueryRow(context.Background(), "SELECT email FROM profiles WHERE id = $1", userID).Scan(&emailTo); err == nil {
+			subject := "Welcome to G4 Car Service!"
+			body := email.GetWelcomeTemplate(fullName)
+			email.SendEmail([]string{emailTo}, subject, body, cfg)
+		} else {
+			slog.Error("Failed to fetch user email for notification", "user_id", userID, "error", err)
+		}
+	}()
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"id": newID, "status": "success"})
+}
