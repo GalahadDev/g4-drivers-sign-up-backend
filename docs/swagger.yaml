@@ -1,0 +1,562 @@
+basePath: /api
+definitions:
+  admin.AdminStats:
+    properties:
+      new_users_last_week:
+        type: integer
+      total_comfort:
+        type: integer
+      total_luxury:
+        type: integer
+      total_referrals:
+        type: integer
+      total_users:
+        type: integer
+    type: object
+  admin.AdminUserDetailResponse:
+    properties:
+      application:
+        $ref: '#/definitions/admin.DriverApplicationDetail'
+      avatar_url:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      referral_code:
+        type: string
+      referred_by:
+        description: Quién lo invitó
+        type: string
+      role:
+        type: string
+    type: object
+  admin.AdminUserListItem:
+    properties:
+      driver_category:
+        type: string
+      driver_status:
+        type: string
+      email:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+      referred_count:
+        type: integer
+      role:
+        type: string
+    type: object
+  admin.DriverApplicationDetail:
+    properties:
+      additional_info:
+        additionalProperties: true
+        type: object
+      address:
+        type: string
+      car_registration_url:
+        type: string
+      created_at:
+        type: string
+      device_type:
+        type: string
+      driver_category:
+        type: string
+      driver_license_url:
+        description: Documentos
+        type: string
+      emergency_number:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+      insurance_files_urls:
+        items:
+          type: string
+        type: array
+      passenger_capacity:
+        type: integer
+      phone_number:
+        type: string
+      profile_photo_url:
+        type: string
+      status:
+        type: string
+      tlc_diamond_url:
+        type: string
+      tlc_license_url:
+        type: string
+      user_id:
+        type: string
+      vehicle_inspection_url:
+        type: string
+      vehicle_photos_urls:
+        items:
+          type: string
+        type: array
+      vehicle_type:
+        type: string
+    type: object
+  admin.PaginationMeta:
+    properties:
+      current_page:
+        type: integer
+      items_per_page:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  admin.UserListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/admin.AdminUserListItem'
+        type: array
+      meta:
+        $ref: '#/definitions/admin.PaginationMeta'
+    type: object
+  dashboard.ProfileInfo:
+    properties:
+      avatar_url:
+        type: string
+      email:
+        type: string
+      full_name:
+        type: string
+      referral_code:
+        type: string
+      status:
+        type: string
+    type: object
+  dashboard.ReferralItem:
+    properties:
+      avatar_url:
+        description: 'Nuevo: Foto de perfil'
+        type: string
+      email:
+        type: string
+      full_name:
+        description: 'Nuevo: Nombre del conductor (si existe)'
+        type: string
+      joined_at:
+        type: string
+      status:
+        type: string
+    type: object
+  dashboard.ReferralStats:
+    properties:
+      current_page:
+        description: Nuevo
+        type: integer
+      items_per_page:
+        description: Nuevo
+        type: integer
+      total_pages:
+        description: 'Nuevo: Paginación'
+        type: integer
+      total_referred:
+        type: integer
+    type: object
+  dashboard.UserDashboard:
+    properties:
+      profile:
+        $ref: '#/definitions/dashboard.ProfileInfo'
+      referral_list:
+        items:
+          $ref: '#/definitions/dashboard.ReferralItem'
+        type: array
+      referral_stats:
+        $ref: '#/definitions/dashboard.ReferralStats'
+    type: object
+  users.DriverApplicationFull:
+    properties:
+      additional_info:
+        additionalProperties: true
+        description: Extras
+        type: object
+      address:
+        type: string
+      car_registration_url:
+        type: string
+      created_at:
+        type: string
+      device_type:
+        type: string
+      driver_category:
+        type: string
+      driver_license_url:
+        description: Documentos (URLs)
+        type: string
+      emergency_number:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+      insurance_files_urls:
+        items:
+          type: string
+        type: array
+      passenger_capacity:
+        type: integer
+      phone_number:
+        type: string
+      profile_photo_url:
+        type: string
+      status:
+        type: string
+      tlc_diamond_url:
+        type: string
+      tlc_license_url:
+        type: string
+      user_id:
+        type: string
+      vehicle_category:
+        description: 'Nota: VehicleCategory lo eliminamos de la BD, mapearemos DriverCategory
+          aquí por compatibilidad'
+        type: string
+      vehicle_inspection_url:
+        type: string
+      vehicle_photos_urls:
+        items:
+          type: string
+        type: array
+      vehicle_type:
+        description: Datos Vehículo
+        type: string
+    type: object
+  users.UpdateProfileRequest:
+    properties:
+      address:
+        description: Va a driver_applications
+        type: string
+      avatar_url:
+        description: Va a profiles (NUEVO)
+        type: string
+      phone_number:
+        description: Va a driver_applications
+        type: string
+    type: object
+  users.UserProfileResponse:
+    properties:
+      application:
+        allOf:
+        - $ref: '#/definitions/users.DriverApplicationFull'
+        description: Datos de la tabla 'driver_applications' (Puede ser null si no
+          se ha registrado)
+      avatar_url:
+        description: Puede ser null
+        type: string
+      email:
+        type: string
+      id:
+        description: Datos de la tabla 'profiles' (Auth)
+        type: string
+      referral_code:
+        type: string
+      role:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: samllachp@gmail.com
+    name: API Support
+  description: API for G4 Car Service Drivers Application.
+  termsOfService: http://swagger.io/terms/
+  title: G4 Drivers API
+  version: "1.0"
+paths:
+  /admin/stats:
+    get:
+      consumes:
+      - application/json
+      description: Get global platform statistics (users, applications, referrals)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.AdminStats'
+        "500":
+          description: Stats Error
+          schema:
+            type: string
+      security:
+      - BearerAuth: []
+      summary: Get Admin Stats
+      tags:
+      - admin
+  /admin/user:
+    get:
+      consumes:
+      - application/json
+      description: Get full details of a specific user including profile and application
+        data
+      parameters:
+      - description: User UUID
+        in: query
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.AdminUserDetailResponse'
+        "400":
+          description: Missing id parameter
+          schema:
+            type: string
+        "404":
+          description: User not found
+          schema:
+            type: string
+      security:
+      - BearerAuth: []
+      summary: Get User Detail (Admin)
+      tags:
+      - admin
+  /admin/users:
+    get:
+      consumes:
+      - application/json
+      description: Get paginated list of all users and their application status
+      parameters:
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.UserListResponse'
+        "403":
+          description: Forbidden
+          schema:
+            type: string
+        "500":
+          description: DB Error
+          schema:
+            type: string
+      security:
+      - BearerAuth: []
+      summary: List Users (Admin)
+      tags:
+      - admin
+  /drivers/register:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Submit driver application with documents and photos
+      parameters:
+      - description: Full Name
+        in: formData
+        name: full_name
+        required: true
+        type: string
+      - description: Address
+        in: formData
+        name: address
+        required: true
+        type: string
+      - description: Phone Number
+        in: formData
+        name: phone_number
+        required: true
+        type: string
+      - description: Emergency Contact
+        in: formData
+        name: emergency_number
+        required: true
+        type: string
+      - description: Device Type (phone/tablet)
+        in: formData
+        name: device_type
+        required: true
+        type: string
+      - description: Vehicle Type
+        in: formData
+        name: vehicle_type
+        required: true
+        type: string
+      - description: Passenger Capacity
+        in: formData
+        name: passenger_capacity
+        required: true
+        type: integer
+      - description: Category (comfort/luxury)
+        in: formData
+        name: driver_category
+        required: true
+        type: string
+      - description: Driver's License
+        in: formData
+        name: driver_license
+        required: true
+        type: file
+      - description: TLC License
+        in: formData
+        name: tlc_license
+        required: true
+        type: file
+      - description: Car Registration
+        in: formData
+        name: car_registration
+        required: true
+        type: file
+      - description: Vehicle Inspection
+        in: formData
+        name: vehicle_inspection
+        required: true
+        type: file
+      - description: TLC Diamond
+        in: formData
+        name: tlc_diamond
+        required: true
+        type: file
+      - description: Profile Photo
+        in: formData
+        name: profile_photo
+        type: file
+      - description: Vehicle Photos (Array)
+        in: formData
+        name: vehicle_photos
+        required: true
+        type: file
+      - description: Insurance Files (Array)
+        in: formData
+        name: insurance_files
+        required: true
+        type: file
+      - description: JSON String with extras
+        in: formData
+        name: additional_info
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: '{"status":"success"}'
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      security:
+      - BearerAuth: []
+      summary: Register as Driver
+      tags:
+      - drivers
+  /user/dashboard:
+    get:
+      consumes:
+      - application/json
+      description: Get user dashboard including referral stats and referal list
+      parameters:
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dashboard.UserDashboard'
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      security:
+      - BearerAuth: []
+      summary: Get My Dashboard
+      tags:
+      - dashboard
+  /user/me:
+    get:
+      consumes:
+      - application/json
+      description: Get current user profile and application status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/users.UserProfileResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "404":
+          description: User not found
+          schema:
+            type: string
+      security:
+      - BearerAuth: []
+      summary: Get My Profile
+      tags:
+      - users
+  /user/profile:
+    put:
+      consumes:
+      - application/json
+      description: Update user phone, address or avatar
+      parameters:
+      - description: Update Data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/users.UpdateProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{"status":"updated"}'
+          schema:
+            type: string
+        "400":
+          description: Invalid Body
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      security:
+      - BearerAuth: []
+      summary: Update My Profile
+      tags:
+      - users
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
