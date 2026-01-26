@@ -64,21 +64,18 @@ func RegisterDriver(w http.ResponseWriter, r *http.Request) {
 	vehicleType := strings.TrimSpace(r.FormValue("vehicle_type"))
 	driverCategory := strings.TrimSpace(r.FormValue("driver_category"))
 
-	// Validación de campos de texto obligatorios
 	if fullName == "" || address == "" || phoneNumber == "" || emergencyNumber == "" ||
 		deviceType == "" || vehicleType == "" {
 		http.Error(w, "Missing required text fields (name, address, phone, vehicle info)", http.StatusBadRequest)
 		return
 	}
 
-	// Validación de Capacidad (Debe ser número y mayor a 0)
 	passengerCapacity, err := strconv.Atoi(r.FormValue("passenger_capacity"))
 	if err != nil || passengerCapacity <= 0 {
 		http.Error(w, "Invalid passenger capacity", http.StatusBadRequest)
 		return
 	}
 
-	// Validación de Categoría
 	if driverCategory != "comfort" && driverCategory != "luxury" {
 		http.Error(w, "Invalid category. Must be 'comfort' or 'luxury'", http.StatusBadRequest)
 		return
@@ -91,7 +88,8 @@ func RegisterDriver(w http.ResponseWriter, r *http.Request) {
 		}
 		defer file.Close()
 
-		url, err := storage.UploadFile(file, header, "docs", cfg)
+		folder := fmt.Sprintf("%s/docs", userID)
+		url, err := storage.UploadFile(file, header, folder, cfg)
 		if err != nil {
 			return "", fmt.Errorf("upload failed for %s: %v", formKey, err)
 		}
@@ -101,11 +99,12 @@ func RegisterDriver(w http.ResponseWriter, r *http.Request) {
 	uploadOptional := func(formKey string) string {
 		file, header, err := r.FormFile(formKey)
 		if err != nil {
-			return "" // No pasa nada si no existe
+			return ""
 		}
 		defer file.Close()
 
-		url, err := storage.UploadFile(file, header, "avatars", cfg)
+		folder := fmt.Sprintf("%s/avatars", userID)
+		url, err := storage.UploadFile(file, header, folder, cfg)
 		if err != nil {
 			slog.Error("Optional upload failed", "key", formKey, "error", err)
 			return ""
@@ -138,13 +137,16 @@ func RegisterDriver(w http.ResponseWriter, r *http.Request) {
 
 	profilePhotoURL := uploadOptional("profile_photo")
 
-	uploadMultipleRequired := func(formKey string, folder string) ([]string, error) {
+	uploadMultipleRequired := func(formKey string, subfolder string) ([]string, error) {
 		var urls []string
 		files := r.MultipartForm.File[formKey]
 
 		if len(files) == 0 {
 			return nil, fmt.Errorf("missing required files list: %s", formKey)
 		}
+
+		// Restructure: folder became userID/subfolder
+		folder := fmt.Sprintf("%s/%s", userID, subfolder)
 
 		for _, fileHeader := range files {
 			file, err := fileHeader.Open()
@@ -178,6 +180,27 @@ func RegisterDriver(w http.ResponseWriter, r *http.Request) {
 	additionalInfoStr := r.FormValue("additional_info")
 	if additionalInfoStr == "" {
 		additionalInfoStr = "{}"
+	}
+
+	var additionalMap map[string]interface{}
+	if err := json.Unmarshal([]byte(additionalInfoStr), &additionalMap); err == nil {
+		if refCode, ok := additionalMap["referralCode"].(string); ok && refCode != "" {
+			refCode = strings.TrimSpace(refCode)
+			if refCode != "" {
+				slog.Info("Attempting to apply referral code from form", "user_id", userID, "code", refCode)
+				// Update profile only if referred_by_code is NULL
+				// We don't overwrite existing referrals
+				_, err := database.Pool.Exec(r.Context(),
+					`UPDATE profiles SET referred_by_code = $1 WHERE id = $2 AND referred_by_code IS NULL`,
+					refCode, userID)
+				if err != nil {
+					slog.Error("Failed to update referral code from form", "error", err)
+					// Proceeding anyway, not a fatal error for the application itself
+				} else {
+					slog.Info("Referral code processed successfully")
+				}
+			}
+		}
 	}
 
 	status := "approved"

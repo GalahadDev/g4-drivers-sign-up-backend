@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 
@@ -15,6 +16,8 @@ import (
 	"g4-services/api/handlers/dashboard"
 	"g4-services/api/handlers/drivers"
 	"g4-services/api/handlers/users"
+	"g4-services/api/handlers/vision"
+	visionService "g4-services/api/services/vision"
 
 	_ "g4-services/docs"
 )
@@ -55,10 +58,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Router Principal
+	// 4. Vision Service
+	visionSvc, err := visionService.NewVisionService()
+	if err != nil {
+		slog.Error("Failed to create Vision Service", "error", err)
+	} else {
+		defer visionSvc.Close()
+	}
+
+	// Main Router
 	mainMux := http.NewServeMux()
 
-	// Router para la API (El Grupo)
+	// API Router
 	apiMux := http.NewServeMux()
 
 	// --- MIDDLEWARE HELPERS ---
@@ -82,10 +93,17 @@ func main() {
 		return middleware.RateLimitMiddleware(protected(h), 1, 10)
 	}
 
-	// --- RUTAS DE LA API  ---
+	visionLimit := func(h http.HandlerFunc) http.Handler {
+		return middleware.RateLimitMiddleware(protected(h), 0.0833, 3)
+	}
+
+	// --- API ROUTES  ---
 
 	// Drivers & User
 	apiMux.Handle("POST /drivers/register", strictLimit(drivers.RegisterDriver))
+	if visionSvc != nil {
+		apiMux.Handle("POST /drivers/validate-photo", visionLimit(vision.ValidatePhoto(visionSvc)))
+	}
 	apiMux.Handle("GET /user/dashboard", standardLimit(dashboard.GetMyDashboard))
 	apiMux.Handle("PUT /user/profile", mediumLimit(users.UpdateMyProfile))
 	apiMux.Handle("GET /user/me", standardLimit(users.GetMe))
@@ -109,7 +127,18 @@ func main() {
 
 	handler := middleware.RequestLogger(middleware.CORSMiddleware(mainMux))
 
-	if err := http.ListenAndServe(":"+cfg.Port, handler); err != nil {
+	server := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       180 * time.Second, // 3 minutes per user request
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	slog.Info("Server configuration applied", "read_timeout", "180s", "write_timeout", "30s")
+
+	if err := server.ListenAndServe(); err != nil {
 		slog.Error("Server failed", "error", err)
 		os.Exit(1)
 	}

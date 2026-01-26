@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"g4-services/api/config"
 	"g4-services/api/database"
@@ -13,20 +14,22 @@ import (
 )
 
 type UpdateProfileRequest struct {
-	Phone     string `json:"phone_number"`
-	Address   string `json:"address"`
-	AvatarURL string `json:"avatar_url"`
+	Phone        string `json:"phone_number"`
+	Address      string `json:"address"`
+	AvatarURL    string `json:"avatar_url"`
+	ReferralCode string `json:"referral_code"`
 }
 
 // UpdateMyProfile godoc
 // @Summary      Update My Profile
-// @Description  Update user phone, address or avatar
+// @Description  Update user phone, address, avatar or set referral code
 // @Tags         users
 // @Accept       json
 // @Produce      json
 // @Param        request body UpdateProfileRequest true "Update Data"
 // @Success      200  {string}  string "{"status":"updated"}"
 // @Failure      400  {string}  string "Invalid Body"
+// @Failure      409  {string}  string "Conflict (Already referred)"
 // @Failure      500  {string}  string "Server Error"
 // @Router       /user/profile [put]
 // @Security     BearerAuth
@@ -47,7 +50,6 @@ func UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	if req.Phone != "" || req.Address != "" {
-
 		sqlDriver := `
 			UPDATE driver_applications 
 			SET phone_number = COALESCE(NULLIF($1, ''), phone_number),
@@ -64,10 +66,45 @@ func UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 
 	if req.AvatarURL != "" {
 		sqlProfile := `UPDATE profiles SET avatar_url = $1, updated_at = NOW() WHERE id = $2`
-
 		if _, err := tx.Exec(r.Context(), sqlProfile, req.AvatarURL, userID); err != nil {
 			slog.Error("Failed to update avatar", "error", err)
 			http.Error(w, "Update Avatar Failed", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.ReferralCode != "" {
+		code := strings.TrimSpace(req.ReferralCode)
+
+		// Check if user already has a referrer
+		var existingRef *string
+		err := tx.QueryRow(r.Context(), "SELECT referred_by_code FROM profiles WHERE id = $1", userID).Scan(&existingRef)
+		if err != nil {
+			slog.Error("Failed to check existing referrer", "error", err)
+			http.Error(w, "Database Error", http.StatusInternalServerError)
+			return
+		}
+
+		if existingRef != nil {
+			http.Error(w, "User already has a referrer", http.StatusConflict) // 409 Conflict
+			return
+		}
+
+		var referrerID string
+		err = tx.QueryRow(r.Context(), "SELECT id FROM profiles WHERE referral_code = $1", code).Scan(&referrerID)
+		if err != nil {
+			http.Error(w, "Invalid referral code", http.StatusBadRequest)
+			return
+		}
+
+		if referrerID == userID {
+			http.Error(w, "Cannot refer yourself", http.StatusBadRequest)
+			return
+		}
+
+		if _, err := tx.Exec(r.Context(), "UPDATE profiles SET referred_by_code = $1 WHERE id = $2", code, userID); err != nil {
+			slog.Error("Failed to set referred_by_code", "error", err)
+			http.Error(w, "Failed to apply referral", http.StatusInternalServerError)
 			return
 		}
 	}

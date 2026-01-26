@@ -9,7 +9,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// IPRateLimiter gestiona límites por IP o Usuario
 type IPRateLimiter struct {
 	ips map[string]*rate.Limiter
 	mu  *sync.RWMutex
@@ -17,7 +16,6 @@ type IPRateLimiter struct {
 	b   int
 }
 
-// NewIPRateLimiter crea un limitador que permite r requests por segundo con ráfaga de b
 func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
 	i := &IPRateLimiter{
 		ips: make(map[string]*rate.Limiter),
@@ -30,7 +28,6 @@ func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
 	return i
 }
 
-// AddIP crea un limitador para una key si no existe
 func (i *IPRateLimiter) GetLimiter(key string) *rate.Limiter {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -44,7 +41,6 @@ func (i *IPRateLimiter) GetLimiter(key string) *rate.Limiter {
 	return limiter
 }
 
-// cleanup elimina entradas viejas
 func (i *IPRateLimiter) cleanup() {
 	for {
 		time.Sleep(1 * time.Hour)
