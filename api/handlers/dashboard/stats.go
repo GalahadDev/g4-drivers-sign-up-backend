@@ -4,17 +4,19 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strconv" // Added for pagination
+	"strconv"
 
 	"g4-services/api/database"
+	"g4-services/api/domains"
 
 	"github.com/jackc/pgx/v5"
 )
 
 type UserDashboard struct {
-	Profile       ProfileInfo    `json:"profile"`
-	ReferralStats ReferralStats  `json:"referral_stats"`
-	ReferralList  []ReferralItem `json:"referral_list"`
+	Profile       ProfileInfo                `json:"profile"`
+	ReferralStats ReferralStats              `json:"referral_stats"`
+	ReferralList  []ReferralItem             `json:"referral_list"`
+	Application   *domains.DriverApplication `json:"application,omitempty"`
 }
 
 type ProfileInfo struct {
@@ -88,6 +90,37 @@ func GetMyDashboard(w http.ResponseWriter, r *http.Request) {
 		slog.Error("Error getting dashboard profile", "error", err)
 		http.Error(w, "Server Error", http.StatusInternalServerError)
 		return
+	}
+
+	// 1.5 Fetch Full Application if exists
+	var app domains.DriverApplication
+	var additionalInfoBytes []byte
+	sqlApp := `
+		SELECT id, user_id, full_name, address, phone_number, emergency_number,
+		       device_type, driver_category, vehicle_type, passenger_capacity,
+			   driver_license_url, tlc_license_url, car_registration_url,
+			   vehicle_inspection_url, tlc_diamond_url, insurance_files_urls,
+			   profile_photo_url, vehicle_photos_urls, additional_info,
+			   status, created_at
+		FROM driver_applications
+		WHERE user_id = $1`
+
+	err = database.Pool.QueryRow(r.Context(), sqlApp, userID).Scan(
+		&app.ID, &app.UserID, &app.FullName, &app.Address, &app.PhoneNumber, &app.EmergencyNumber,
+		&app.DeviceType, &app.DriverCategory, &app.VehicleType, &app.PassengerCapacity,
+		&app.DriverLicenseURL, &app.TLCLicenseURL, &app.CarRegistrationURL,
+		&app.VehicleInspectionURL, &app.TLCDiamondURL, &app.InsuranceFilesURLs,
+		&app.ProfilePhotoURL, &app.VehiclePhotosURLs, &additionalInfoBytes,
+		&app.Status, &app.CreatedAt,
+	)
+
+	if err == nil {
+		if len(additionalInfoBytes) > 0 {
+			_ = json.Unmarshal(additionalInfoBytes, &app.AdditionalInfo)
+		}
+		response.Application = &app
+	} else if err != pgx.ErrNoRows {
+		slog.Error("Error fetching application details", "error", err)
 	}
 
 	var totalReferred int

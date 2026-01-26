@@ -16,6 +16,7 @@ type UserProfileResponse struct {
 	Email        string    `json:"email"`
 	Role         string    `json:"role"`
 	ReferralCode string    `json:"referral_code"`
+	ReferredBy   *string   `json:"referred_by,omitempty"`
 	AvatarURL    *string   `json:"avatar_url"`
 
 	Application *DriverApplicationFull `json:"application"`
@@ -67,7 +68,7 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 	sql := `
 		SELECT 
 			-- Tabla Profiles
-			p.id, p.email, p.role, p.referral_code, p.avatar_url,
+			p.id, p.email, p.role, p.referral_code, p.referred_by_code, p.avatar_url,
 			
 			-- Tabla Driver Applications (21 columnas)
 			da.id, da.user_id, da.full_name, da.address, da.phone_number, da.emergency_number,
@@ -82,6 +83,7 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 		WHERE p.id = $1`
 
 	var (
+		pRefBy             *string
 		pAvatar            *string
 		appID              *uuid.UUID
 		appUserID          *uuid.UUID
@@ -107,7 +109,7 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 	)
 
 	err := database.Pool.QueryRow(r.Context(), sql, userID).Scan(
-		&response.ID, &response.Email, &response.Role, &response.ReferralCode, &pAvatar,
+		&response.ID, &response.Email, &response.Role, &response.ReferralCode, &pRefBy, &pAvatar,
 		&appID, &appUserID, &appFullName, &appAddress, &appPhone, &appEmergency,
 		&appDevice, &appCategory, &appVehicleType, &appCapacity,
 		&appLicenseURL, &appTLCURL, &appCarRegURL,
@@ -121,6 +123,8 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
+
+	response.ReferredBy = pRefBy
 
 	response.AvatarURL = pAvatar
 
@@ -151,7 +155,6 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: *appCreatedAt,
 		}
 
-		// Parsear JSONB
 		if len(appAdditionalBytes) > 0 {
 			_ = json.Unmarshal(appAdditionalBytes, &appData.AdditionalInfo)
 		} else {

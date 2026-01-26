@@ -11,6 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
+type ReferralItem struct {
+	FullName  string    `json:"full_name"`
+	CreatedAt time.Time `json:"created_at"`
+	Status    string    `json:"status"`
+}
+
 type AdminUserDetailResponse struct {
 	ID           uuid.UUID `json:"id"`
 	Email        string    `json:"email"`
@@ -20,6 +26,7 @@ type AdminUserDetailResponse struct {
 	AvatarURL    *string   `json:"avatar_url"`
 
 	Application *DriverApplicationDetail `json:"application"`
+	Referrals   []ReferralItem           `json:"referrals"`
 }
 
 type DriverApplicationDetail struct {
@@ -68,6 +75,7 @@ func GetUserDetail(w http.ResponseWriter, r *http.Request) {
 
 	response := AdminUserDetailResponse{}
 
+	// 1. Get Main User + App Data
 	sql := `
 		SELECT 
 			p.id, p.email, p.role, p.referral_code, p.referred_by_code, p.avatar_url,
@@ -125,6 +133,33 @@ func GetUserDetail(w http.ResponseWriter, r *http.Request) {
 
 	response.Referrer = pRefBy
 	response.AvatarURL = pAvatar
+
+	// 2. Fetch Referrals if referral code exists
+	response.Referrals = []ReferralItem{}
+	if response.ReferralCode != "" {
+		refSQL := `
+			SELECT
+				COALESCE(da.full_name, p.email),
+				p.created_at,
+				COALESCE(da.status, 'pending')
+			FROM profiles p
+			LEFT JOIN driver_applications da ON p.id = da.user_id
+			WHERE p.referred_by_code = $1
+			ORDER BY p.created_at DESC`
+
+		rows, err := database.Pool.Query(r.Context(), refSQL, response.ReferralCode)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var rItem ReferralItem
+				if err := rows.Scan(&rItem.FullName, &rItem.CreatedAt, &rItem.Status); err == nil {
+					response.Referrals = append(response.Referrals, rItem)
+				}
+			}
+		} else {
+			slog.Error("Admin fetch referrals failed", "error", err)
+		}
+	}
 
 	if appID != nil {
 		app := &DriverApplicationDetail{

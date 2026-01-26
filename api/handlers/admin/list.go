@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"g4-services/api/database"
 
@@ -19,6 +20,7 @@ type AdminUserListItem struct {
 	DriverStatus   string `json:"driver_status"`
 	DriverCategory string `json:"driver_category"`
 	ReferredCount  int    `json:"referred_count"`
+	CreatedAt      string `json:"created_at"`
 }
 
 type UserListResponse struct {
@@ -41,6 +43,8 @@ type PaginationMeta struct {
 // @Produce      json
 // @Param        page  query     int     false  "Page number"
 // @Param        limit query     int     false  "Items per page"
+// @Param        search query    string  false  "Search by name or email"
+// @Param        category query  string  false  "Filter by category"
 // @Success      200   {object}  UserListResponse
 // @Failure      403   {string}  string "Forbidden"
 // @Failure      500   {string}  string "DB Error"
@@ -50,6 +54,8 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
 
 	pageStr := r.URL.Query().Get("page")
 	limitStr := r.URL.Query().Get("limit")
+	search := r.URL.Query().Get("search")
+	category := r.URL.Query().Get("category")
 
 	page, err := strconv.Atoi(pageStr)
 	if err != nil || page < 1 {
@@ -64,28 +70,62 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
 		limit = 200
 	}
 
+	// 1. Build Dynamic Dynamic WHERE clause
+	whereSQL := "WHERE p.role != 'admin'"
+	args := []interface{}{}
+	argCounter := 1
+
+	// Filter by Category
+	if category != "" && category != "all" {
+		whereSQL += " AND da.driver_category = $" + strconv.Itoa(argCounter)
+		args = append(args, category)
+		argCounter++
+	}
+
+	// Filter by Search (Email or Name)
+	if search != "" {
+		searchParam := "%" + search + "%"
+		whereSQL += " AND (p.email ILIKE $" + strconv.Itoa(argCounter) + " OR da.full_name ILIKE $" + strconv.Itoa(argCounter) + ")"
+		args = append(args, searchParam)
+		argCounter++
+	}
+
+	// 2. Count Total Items (with filters)
 	var totalItems int
-	err = database.Pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM profiles").Scan(&totalItems)
+	countSQL := `
+		SELECT COUNT(*) 
+		FROM profiles p
+		LEFT JOIN driver_applications da ON p.id = da.user_id
+		` + whereSQL
+
+	err = database.Pool.QueryRow(r.Context(), countSQL, args...).Scan(&totalItems)
 	if err != nil {
 		slog.Error("Admin list users count error", "error", err)
 		totalItems = 0
 	}
 
+	// 3. Get Data (with filters + pagination)
 	offset := (page - 1) * limit
-	sql := `
+
+	// Append Limit & Offset to args
+	args = append(args, limit, offset)
+
+	dataSQL := `
 		SELECT 
 			p.id, p.email, p.role,
 			COALESCE(da.full_name, 'N/A'),
-			COALESCE(da.status, 'no_app'),
+			COALESCE(da.status, 'pending'),
 			COALESCE(da.driver_category, 'none'),
-			(SELECT COUNT(*) FROM profiles WHERE referred_by_code = p.referral_code) as total_referrals
+			(SELECT COUNT(*) FROM profiles WHERE referred_by_code = p.referral_code) as total_referrals,
+			p.created_at
 		FROM profiles p
 		LEFT JOIN driver_applications da ON p.id = da.user_id
+		` + whereSQL + `
 		ORDER BY p.created_at DESC
-		LIMIT $1 OFFSET $2`
+		LIMIT $` + strconv.Itoa(argCounter) + ` OFFSET $` + strconv.Itoa(argCounter+1)
 
 	var rows pgx.Rows
-	rows, err = database.Pool.Query(r.Context(), sql, limit, offset)
+	rows, err = database.Pool.Query(r.Context(), dataSQL, args...)
 	if err != nil {
 		slog.Error("Admin list users error", "error", err)
 		http.Error(w, "DB Error", http.StatusInternalServerError)
@@ -96,7 +136,9 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
 	users := []AdminUserListItem{}
 	for rows.Next() {
 		var u AdminUserListItem
-		if err := rows.Scan(&u.ID, &u.Email, &u.Role, &u.FullName, &u.DriverStatus, &u.DriverCategory, &u.ReferredCount); err == nil {
+		var createdAtTime time.Time
+		if err := rows.Scan(&u.ID, &u.Email, &u.Role, &u.FullName, &u.DriverStatus, &u.DriverCategory, &u.ReferredCount, &createdAtTime); err == nil {
+			u.CreatedAt = createdAtTime.Format(time.RFC3339)
 			users = append(users, u)
 		}
 	}
@@ -110,7 +152,7 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
 			ItemsPerPage: limit,
 		},
 	}
-	if totalItems == 0 {
+	if totalItems == 0 && resp.Meta.TotalPages == 0 {
 		resp.Meta.TotalPages = 1
 	}
 

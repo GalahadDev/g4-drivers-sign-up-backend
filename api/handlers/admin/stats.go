@@ -30,10 +30,16 @@ func GetGlobalStats(w http.ResponseWriter, r *http.Request) {
 
 	sql := `
 		SELECT
-			(SELECT COUNT(*) FROM profiles) as total_users,
-			(SELECT COUNT(*) FROM driver_applications WHERE driver_category = 'comfort') as comfort,
-			(SELECT COUNT(*) FROM driver_applications WHERE driver_category = 'luxury') as luxury,
-			(SELECT COUNT(*) FROM profiles WHERE created_at > NOW() - INTERVAL '7 days') as new_users,
+			(SELECT COUNT(*) FROM profiles WHERE role != 'admin') as total_users,
+			(SELECT COUNT(*) 
+			 FROM driver_applications da 
+			 JOIN profiles p ON da.user_id = p.id 
+			 WHERE da.driver_category = 'comfort' AND p.role != 'admin') as comfort,
+			(SELECT COUNT(*) 
+			 FROM driver_applications da 
+			 JOIN profiles p ON da.user_id = p.id 
+			 WHERE da.driver_category = 'luxury' AND p.role != 'admin') as luxury,
+			(SELECT COUNT(*) FROM profiles WHERE created_at > NOW() - INTERVAL '7 days' AND role != 'admin') as new_users,
 			(SELECT COUNT(*) FROM profiles WHERE referred_by_code IS NOT NULL) as total_referrals
 	`
 
