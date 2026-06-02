@@ -30,18 +30,13 @@ func GetGlobalStats(w http.ResponseWriter, r *http.Request) {
 
 	sql := `
 		SELECT
-			(SELECT COUNT(*) FROM profiles WHERE role != 'admin') as total_users,
-			(SELECT COUNT(*) 
-			 FROM driver_applications da 
-			 JOIN profiles p ON da.user_id = p.id 
-			 WHERE da.driver_category = 'comfort' AND p.role != 'admin') as comfort,
-			(SELECT COUNT(*) 
-			 FROM driver_applications da 
-			 JOIN profiles p ON da.user_id = p.id 
-			 WHERE da.driver_category = 'luxury' AND p.role != 'admin') as luxury,
-			(SELECT COUNT(*) FROM profiles WHERE created_at > NOW() - INTERVAL '7 days' AND role != 'admin') as new_users,
-			(SELECT COUNT(*) FROM profiles WHERE referred_by_code IS NOT NULL) as total_referrals
-	`
+			COUNT(*) FILTER (WHERE p.role != 'admin')                                               AS total_users,
+			COUNT(*) FILTER (WHERE da.driver_category = 'comfort' AND p.role != 'admin')           AS total_comfort,
+			COUNT(*) FILTER (WHERE da.driver_category = 'luxury'  AND p.role != 'admin')           AS total_luxury,
+			COUNT(*) FILTER (WHERE p.created_at > NOW() - INTERVAL '7 days' AND p.role != 'admin') AS new_users,
+			COUNT(*) FILTER (WHERE p.referred_by_code IS NOT NULL)                                  AS total_referrals
+		FROM profiles p
+		LEFT JOIN driver_applications da ON da.user_id = p.id`
 
 	err := database.Pool.QueryRow(r.Context(), sql).Scan(
 		&stats.TotalUsers,

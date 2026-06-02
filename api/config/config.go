@@ -18,14 +18,11 @@ type AppConfig struct {
 	SupabaseURL    string
 	JWTSecret      string
 	ServiceRoleKey string
-	SMTPHost       string
-	SMTPPort       string
-	SMTPEmail      string
-	SMTPPassword   string
+	BrevoAPIKey    string
+	BrevoFromEmail string
 }
 
 func Load() (*AppConfig, error) {
-
 	if err := godotenv.Load(); err != nil {
 		slog.Warn("No .env file found or error loading it. Relying on system environment variables.")
 	} else {
@@ -45,10 +42,8 @@ func Load() (*AppConfig, error) {
 		JWTSecret:      os.Getenv("JWT_SECRET"),
 		ServiceRoleKey: os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
 
-		SMTPHost:     os.Getenv("SMTP_HOST"),
-		SMTPPort:     os.Getenv("SMTP_PORT"),
-		SMTPEmail:    os.Getenv("SMTP_EMAIL"),
-		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
+		BrevoAPIKey:    os.Getenv("BREVO_API_KEY"),
+		BrevoFromEmail: os.Getenv("BREVO_FROM_EMAIL"),
 	}
 
 	if cfg.SupabaseURL == "" {

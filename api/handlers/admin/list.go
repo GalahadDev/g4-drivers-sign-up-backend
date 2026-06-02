@@ -90,36 +90,28 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
 		argCounter++
 	}
 
-	// 2. Count Total Items (with filters)
-	var totalItems int
-	countSQL := `
-		SELECT COUNT(*) 
-		FROM profiles p
-		LEFT JOIN driver_applications da ON p.id = da.user_id
-		` + whereSQL
-
-	err = database.Pool.QueryRow(r.Context(), countSQL, args...).Scan(&totalItems)
-	if err != nil {
-		slog.Error("Admin list users count error", "error", err)
-		totalItems = 0
-	}
-
-	// 3. Get Data (with filters + pagination)
+	// 2. Get Data with CTE for referral counts + window function for total
 	offset := (page - 1) * limit
-
-	// Append Limit & Offset to args
 	args = append(args, limit, offset)
 
 	dataSQL := `
-		SELECT 
+		WITH referral_counts AS (
+			SELECT referred_by_code, COUNT(*) AS total
+			FROM profiles
+			WHERE referred_by_code IS NOT NULL
+			GROUP BY referred_by_code
+		)
+		SELECT
 			p.id, p.email, p.role,
 			COALESCE(da.full_name, 'N/A'),
 			COALESCE(da.status, 'pending'),
 			COALESCE(da.driver_category, 'none'),
-			(SELECT COUNT(*) FROM profiles WHERE referred_by_code = p.referral_code) as total_referrals,
-			p.created_at
+			COALESCE(rc.total, 0) AS referred_count,
+			p.created_at,
+			COUNT(*) OVER() AS total_count
 		FROM profiles p
 		LEFT JOIN driver_applications da ON p.id = da.user_id
+		LEFT JOIN referral_counts rc ON rc.referred_by_code = p.referral_code
 		` + whereSQL + `
 		ORDER BY p.created_at DESC
 		LIMIT $` + strconv.Itoa(argCounter) + ` OFFSET $` + strconv.Itoa(argCounter+1)
@@ -133,11 +125,12 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	var totalItems int
 	users := []AdminUserListItem{}
 	for rows.Next() {
 		var u AdminUserListItem
 		var createdAtTime time.Time
-		if err := rows.Scan(&u.ID, &u.Email, &u.Role, &u.FullName, &u.DriverStatus, &u.DriverCategory, &u.ReferredCount, &createdAtTime); err == nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Role, &u.FullName, &u.DriverStatus, &u.DriverCategory, &u.ReferredCount, &createdAtTime, &totalItems); err == nil {
 			u.CreatedAt = createdAtTime.Format(time.RFC3339)
 			users = append(users, u)
 		}

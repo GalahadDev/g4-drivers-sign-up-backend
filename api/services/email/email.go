@@ -1,73 +1,78 @@
 package email
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"g4-services/api/config"
+	"io"
 	"log/slog"
-	"net/smtp"
+	"net/http"
+
+	"g4-services/api/config"
 )
 
+const brevoEndpoint = "https://api.brevo.com/v3/smtp/email"
+
+type brevoRecipient struct {
+	Email string `json:"email"`
+}
+
+type brevoSender struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type brevoPayload struct {
+	Sender      brevoSender      `json:"sender"`
+	To          []brevoRecipient `json:"to"`
+	Subject     string           `json:"subject"`
+	HTMLContent string           `json:"htmlContent"`
+}
+
+// SendEmail sends an HTML email to one or more recipients via the Brevo API.
+// Returns nil without sending if BREVO_API_KEY is not configured.
 func SendEmail(to []string, subject string, bodyHTML string, cfg *config.AppConfig) error {
-	if cfg.SMTPHost == "" || cfg.SMTPPort == "" {
-		slog.Warn("SMTP configuration missing, email not sent", "subject", subject)
+	if cfg.BrevoAPIKey == "" {
+		slog.Warn("BREVO_API_KEY not set, email not sent", "subject", subject)
 		return nil
 	}
 
-	auth := smtp.PlainAuth("", cfg.SMTPEmail, cfg.SMTPPassword, cfg.SMTPHost)
-
-	headers := make(map[string]string)
-	headers["From"] = cfg.SMTPEmail
-	headers["To"] = to[0]
-	headers["Subject"] = subject
-	headers["MIME-Version"] = "1.0"
-	headers["Content-Type"] = "text/html; charset=\"UTF-8\""
-
-	message := ""
-	for k, v := range headers {
-		message += fmt.Sprintf("%s: %s\r\n", k, v)
-	}
-	message += "\r\n" + bodyHTML
-
-	addr := fmt.Sprintf("%s:%s", cfg.SMTPHost, cfg.SMTPPort)
-
-	if err := smtp.SendMail(addr, auth, cfg.SMTPEmail, to, []byte(message)); err != nil {
-		slog.Error("Failed to send email", "error", err, "to", to)
-		return err
+	recipients := make([]brevoRecipient, len(to))
+	for i, addr := range to {
+		recipients[i] = brevoRecipient{Email: addr}
 	}
 
-	slog.Info("Email sent successfully", "subject", subject, "to", to)
+	payload := brevoPayload{
+		Sender:      brevoSender{Name: "G4 Car Service", Email: cfg.BrevoFromEmail},
+		To:          recipients,
+		Subject:     subject,
+		HTMLContent: bodyHTML,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("email: marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, brevoEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("email: create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", cfg.BrevoAPIKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("email: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		slog.Error("Brevo rejected email", "status", resp.StatusCode, "body", string(respBody), "subject", subject)
+		return fmt.Errorf("email: Brevo returned status %d", resp.StatusCode)
+	}
+
+	slog.Info("Email sent via Brevo", "subject", subject, "recipients", len(to))
 	return nil
-}
-
-func GetWelcomeTemplate(fullName string) string {
-	return fmt.Sprintf(`
-<!DOCTYPE html>
-<html>
-<body style="margin:0; padding:0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
-    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        <!-- Header -->
-        <div style="background-color: #2E4A35; padding: 20px; text-align: center;">
-            <h1 style="color: #D4AF37; margin: 0; font-size: 24px;">G4 Car Service Inc</h1>
-        </div>
-        
-        <!-- Body -->
-        <div style="padding: 30px; color: #333333;">
-            <h2 style="color: #2E4A35;">Welcome, %s!</h2>
-            <p>Thank you for registering with G4 Car Service.</p>
-            <p>Your application has been received and <strong>automatically approved</strong> as part of our initial launch.</p>
-            <p>You are now an active driver in our system.</p>
-            
-            <div style="margin-top: 30px; padding: 15px; background-color: #f9f9f9; border-left: 4px solid #D4AF37;">
-                <p style="margin: 0; font-size: 14px; color: #555;">Status: <strong style="color: #2E4A35;">Approved</strong></p>
-            </div>
-        </div>
-        
-        <!-- Footer -->
-        <div style="background-color: #2E4A35; padding: 15px; text-align: center; color: #D4AF37; font-size: 12px;">
-            &copy; 2026 G4 Car Service Inc. All rights reserved.
-        </div>
-    </div>
-</body>
-</html>
-`, fullName)
 }

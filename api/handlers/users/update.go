@@ -10,7 +10,9 @@ import (
 
 	"g4-services/api/config"
 	"g4-services/api/database"
+	"g4-services/api/middleware"
 	"g4-services/api/services/email"
+
 )
 
 type UpdateProfileRequest struct {
@@ -33,8 +35,9 @@ type UpdateProfileRequest struct {
 // @Failure      500  {string}  string "Server Error"
 // @Router       /user/profile [put]
 // @Security     BearerAuth
-func UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+func UpdateMyProfile(cfg *config.AppConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(middleware.ContextKeyUserID).(string)
 
 	var req UpdateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -118,7 +121,6 @@ func UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"updated"}`))
 
 	go func() {
-		cfg, _ := config.Load()
 		var emailTo, fullName string
 		if err := database.Pool.QueryRow(context.Background(),
 			"SELECT p.email, COALESCE(da.full_name, 'User') FROM profiles p LEFT JOIN driver_applications da ON p.id = da.user_id WHERE p.id = $1",
@@ -129,4 +131,5 @@ func UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 			email.SendEmail([]string{emailTo}, subject, body, cfg)
 		}
 	}()
+	}
 }

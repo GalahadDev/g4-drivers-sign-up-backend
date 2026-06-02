@@ -1,6 +1,7 @@
 package vision
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -127,4 +128,104 @@ func (s *VisionService) ValidateFormalWear(ctx context.Context, imageContent []b
 	}
 
 	return isFormal, labelDescriptions, nil
+}
+
+// extractTextFromImage calls DOCUMENT_TEXT_DETECTION on a raw image and returns the full text.
+func (s *VisionService) extractTextFromImage(ctx context.Context, content []byte) (string, error) {
+	img, err := vision.NewImageFromReader(bytes.NewReader(content))
+	if err != nil {
+		return "", fmt.Errorf("create image: %w", err)
+	}
+	resp, err := s.client.BatchAnnotateImages(ctx, &visionpb.BatchAnnotateImagesRequest{
+		Requests: []*visionpb.AnnotateImageRequest{
+			{
+				Image:    img,
+				Features: []*visionpb.Feature{{Type: visionpb.Feature_DOCUMENT_TEXT_DETECTION}},
+			},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("vision annotate image: %w", err)
+	}
+	if len(resp.Responses) == 0 {
+		return "", fmt.Errorf("empty vision response")
+	}
+	r := resp.Responses[0]
+	if r.Error != nil {
+		return "", fmt.Errorf("vision error: %s", r.Error.Message)
+	}
+	if r.FullTextAnnotation == nil {
+		return "", nil // no text found — valid result, not an error
+	}
+	return r.FullTextAnnotation.Text, nil
+}
+
+// extractTextFromPDF calls DOCUMENT_TEXT_DETECTION on an inline PDF (≤5 pages).
+func (s *VisionService) extractTextFromPDF(ctx context.Context, content []byte) (string, error) {
+	resp, err := s.client.BatchAnnotateFiles(ctx, &visionpb.BatchAnnotateFilesRequest{
+		Requests: []*visionpb.AnnotateFileRequest{
+			{
+				InputConfig: &visionpb.InputConfig{
+					Content:  content,
+					MimeType: "application/pdf",
+				},
+				Features: []*visionpb.Feature{{Type: visionpb.Feature_DOCUMENT_TEXT_DETECTION}},
+				Pages:    []int32{1, 2, 3, 4, 5},
+			},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("vision annotate PDF: %w", err)
+	}
+	if len(resp.Responses) == 0 {
+		return "", fmt.Errorf("empty PDF vision response")
+	}
+	if resp.Responses[0].Error != nil {
+		return "", fmt.Errorf("vision PDF error: %s", resp.Responses[0].Error.Message)
+	}
+	var sb strings.Builder
+	for _, pageResp := range resp.Responses[0].Responses {
+		if pageResp.FullTextAnnotation != nil {
+			sb.WriteString(pageResp.FullTextAnnotation.Text)
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String(), nil
+}
+
+// ValidateDocument extracts text from the document (image or PDF) and validates it
+// based on docType. A validation failure is returned as a result with Valid=false,
+// NOT as an error. Errors indicate Vision API failures only.
+func (s *VisionService) ValidateDocument(ctx context.Context, req DocumentValidationRequest) (DocumentValidationResult, error) {
+	var (
+		text string
+		err  error
+	)
+	if req.MimeType == "application/pdf" {
+		text, err = s.extractTextFromPDF(ctx, req.Content)
+	} else {
+		text, err = s.extractTextFromImage(ctx, req.Content)
+	}
+	if err != nil {
+		return DocumentValidationResult{}, fmt.Errorf("extract text: %w", err)
+	}
+
+	slog.Info("Document text extracted", "docType", req.DocType, "textLen", len(text))
+
+	switch req.DocType {
+	case "driverLicense":
+		return validateDriverLicense(text, req.ExpectedName)
+	case "tlcLicense":
+		return validateTLCLicense(text, req.ExpectedName)
+	case "carRegistration":
+		return validateCarRegistration(text, req.ExpectedName)
+	case "vehicleInspection":
+		return validateVehicleInspection(text, req.ExpectedPlate)
+	case "tlcDiamond":
+		return validateTLCDiamond(text, req.ExpectedPlate)
+	case "insuranceFiles":
+		return validateInsurance(text)
+	default:
+		return DocumentValidationResult{}, fmt.Errorf("unknown docType %q", req.DocType)
+	}
 }

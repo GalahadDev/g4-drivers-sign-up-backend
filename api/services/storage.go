@@ -14,15 +14,19 @@ import (
 	"github.com/google/uuid"
 )
 
-func ValidateFileContentType(file multipart.File) error {
+// storageClient is shared across all upload calls to reuse TCP+TLS connections.
+var storageClient = &http.Client{Timeout: 60 * time.Second}
+
+// detectContentType reads the first 512 bytes to detect the real MIME type,
+// resets the read pointer, and returns an error if the type is not allowed.
+func detectContentType(file multipart.File) (string, error) {
 	buffer := make([]byte, 512)
 	n, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
-		return err
+		return "", err
 	}
-
 	if _, err := file.Seek(0, 0); err != nil {
-		return err
+		return "", err
 	}
 
 	contentType := http.DetectContentType(buffer[:n])
@@ -33,22 +37,21 @@ func ValidateFileContentType(file multipart.File) error {
 		"image/webp":      true,
 		"application/pdf": true,
 	}
-
 	if !allowedTypes[contentType] {
-		return fmt.Errorf("invalid file type: %s. Only JPG, PNG, WEBP and PDF are allowed", contentType)
+		return "", fmt.Errorf("invalid file type: %s. Only JPG, PNG, WEBP and PDF are allowed", contentType)
 	}
 
-	return nil
+	return contentType, nil
 }
 
 func UploadFile(file multipart.File, fileHeader *multipart.FileHeader, folder string, cfg *config.AppConfig) (string, error) {
-
-	if err := ValidateFileContentType(file); err != nil {
+	detectedType, err := detectContentType(file)
+	if err != nil {
 		return "", err
 	}
 
 	ext := filepath.Ext(fileHeader.Filename)
-	uniqueName := fmt.Sprintf("%s/%s_%s", folder, uuid.New().String(), ext) // ej: licenses/uuid.jpg
+	uniqueName := fmt.Sprintf("%s/%s%s", folder, uuid.New().String(), ext)
 
 	buf := new(bytes.Buffer)
 	if _, err := io.Copy(buf, file); err != nil {
@@ -63,10 +66,9 @@ func UploadFile(file multipart.File, fileHeader *multipart.FileHeader, folder st
 	}
 
 	req.Header.Set("Authorization", "Bearer "+cfg.ServiceRoleKey)
-	req.Header.Set("Content-Type", fileHeader.Header.Get("Content-Type"))
+	req.Header.Set("Content-Type", detectedType)
 
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := storageClient.Do(req)
 	if err != nil {
 		return "", err
 	}
