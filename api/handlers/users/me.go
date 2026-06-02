@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"g4-services/api/database"
+	"g4-services/api/domains"
+	"g4-services/api/middleware"
 
 	"github.com/google/uuid"
 )
@@ -62,7 +64,7 @@ type DriverApplicationFull struct {
 // @Router       /user/me [get]
 // @Security     BearerAuth
 func GetMe(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+	userID := r.Context().Value(middleware.ContextKeyUserID).(string)
 
 	response := UserProfileResponse{}
 	sql := `
@@ -141,12 +143,12 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 			VehicleType:          *appVehicleType,
 			PassengerCapacity:    *appCapacity,
 			VehicleCategory:      *appCategory,
-			DriverLicenseURL:     getString(appLicenseURL),
-			TLCLicenseURL:        getString(appTLCURL),
-			CarRegistrationURL:   getString(appCarRegURL),
-			VehicleInspectionURL: getString(appInspectURL),
-			TLCDiamondURL:        getString(appDiamondURL),
-			ProfilePhotoURL:      getString(appProfilePhotoURL),
+			DriverLicenseURL:     domains.GetString(appLicenseURL),
+			TLCLicenseURL:        domains.GetString(appTLCURL),
+			CarRegistrationURL:   domains.GetString(appCarRegURL),
+			VehicleInspectionURL: domains.GetString(appInspectURL),
+			TLCDiamondURL:        domains.GetString(appDiamondURL),
+			ProfilePhotoURL:      domains.GetString(appProfilePhotoURL),
 
 			InsuranceFilesURLs: appInsuranceURLs,
 			VehiclePhotosURLs:  appVehiclePhotos,
@@ -170,9 +172,3 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func getString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}

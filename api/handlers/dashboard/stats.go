@@ -8,6 +8,7 @@ import (
 
 	"g4-services/api/database"
 	"g4-services/api/domains"
+	"g4-services/api/middleware"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -55,7 +56,7 @@ type ReferralItem struct {
 // @Router       /user/dashboard [get]
 // @Security     BearerAuth
 func GetMyDashboard(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+	userID := r.Context().Value(middleware.ContextKeyUserID).(string)
 	response := UserDashboard{}
 
 	pageStr := r.URL.Query().Get("page")

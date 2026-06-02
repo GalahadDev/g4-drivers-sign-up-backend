@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"g4-services/api/config"
 	"g4-services/api/database"
+	"g4-services/api/middleware"
 	storage "g4-services/api/services"
 	"g4-services/api/services/email"
 )
@@ -43,16 +45,30 @@ import (
 // @Failure      500  {string}  string "Server Error"
 // @Router       /drivers/register [post]
 // @Security     BearerAuth
-func RegisterDriver(w http.ResponseWriter, r *http.Request) {
+func RegisterDriver(cfg *config.AppConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		http.Error(w, "File too large or invalid format", http.StatusBadRequest)
 		return
 	}
 
-	cfg, _ := config.Load()
-	userID, ok := r.Context().Value("user_id").(string)
+	userID, ok := r.Context().Value(middleware.ContextKeyUserID).(string)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Reject duplicate application early, before any file uploads
+	var alreadyExists bool
+	if err := database.Pool.QueryRow(r.Context(),
+		"SELECT EXISTS(SELECT 1 FROM driver_applications WHERE user_id = $1)", userID,
+	).Scan(&alreadyExists); err != nil {
+		slog.Error("Failed to check existing application", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	if alreadyExists {
+		http.Error(w, "Application already submitted", http.StatusConflict)
 		return
 	}
 
@@ -238,16 +254,65 @@ func RegisterDriver(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
-		var emailTo string
-		if err := database.Pool.QueryRow(context.Background(), "SELECT email FROM profiles WHERE id = $1", userID).Scan(&emailTo); err == nil {
-			subject := "Welcome to G4 Car Service!"
-			body := email.GetWelcomeTemplate(fullName)
-			email.SendEmail([]string{emailTo}, subject, body, cfg)
+		ctx := context.Background()
+
+		// Welcome email to driver
+		var driverEmail string
+		if err := database.Pool.QueryRow(ctx,
+			"SELECT email FROM profiles WHERE id = $1", userID,
+		).Scan(&driverEmail); err != nil {
+			slog.Error("Failed to fetch driver email for welcome mail", "user_id", userID, "error", err)
 		} else {
-			slog.Error("Failed to fetch user email for notification", "user_id", userID, "error", err)
+			subject := "Welcome to G4 Car Service!"
+			body := email.WelcomeTemplate(fullName)
+			for attempt := 0; attempt < 3; attempt++ {
+				if err := email.SendEmail([]string{driverEmail}, subject, body, cfg); err == nil {
+					break
+				}
+				slog.Warn("Welcome email attempt failed", "attempt", attempt+1, "user_id", userID)
+				time.Sleep(time.Duration(attempt+1) * 5 * time.Second)
+			}
+		}
+
+		// Admin notification
+		rows, err := database.Pool.Query(ctx,
+			"SELECT email FROM profiles WHERE role = 'admin'")
+		if err != nil {
+			slog.Error("Failed to fetch admin emails for notification", "error", err)
+			return
+		}
+		defer rows.Close()
+
+		var adminEmails []string
+		for rows.Next() {
+			var e string
+			if err := rows.Scan(&e); err == nil {
+				adminEmails = append(adminEmails, e)
+			}
+		}
+
+		if len(adminEmails) == 0 {
+			return
+		}
+
+		adminData := email.AdminNotifData{
+			FullName:     fullName,
+			Category:     driverCategory,
+			Phone:        phoneNumber,
+			RegisteredAt: time.Now(),
+			DashboardURL: "https://g4carservice.com/admin",
+		}
+		if err := email.SendEmail(
+			adminEmails,
+			"New Driver Registration — G4 Car Service",
+			email.AdminNotificationTemplate(adminData),
+			cfg,
+		); err != nil {
+			slog.Error("Failed to send admin notification email", "error", err)
 		}
 	}()
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"id": newID, "status": "success"})
+	}
 }

@@ -69,7 +69,19 @@ func AuthMiddleware(next http.Handler) http.Handler {
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), "user_id", userID)
+			// Try Auth Hook claim first, then fall back to app_metadata.role (standard Supabase).
+			userRole, _ := claims["user_role"].(string)
+			if userRole == "" {
+				if appMeta, ok := claims["app_metadata"].(map[string]any); ok {
+					userRole, _ = appMeta["role"].(string)
+				}
+			}
+			if userRole == "" {
+				userRole = "driver"
+			}
+
+			ctx := context.WithValue(r.Context(), ContextKeyUserID, userID)
+			ctx = context.WithValue(ctx, ContextKeyUserRole, userRole)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		} else {
 			http.Error(w, "Invalid Token", http.StatusUnauthorized)

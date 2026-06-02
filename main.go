@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	httpSwagger "github.com/swaggo/http-swagger/v2"
@@ -66,6 +69,17 @@ func main() {
 		defer visionSvc.Close()
 	}
 
+	// Server context — cancelled on shutdown to stop rate limiter goroutines
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
+	// Rate limiters — one instance per tier, shared across all requests on that tier
+	strictLimiter := middleware.NewIPRateLimiter(serverCtx, 0.00055, 2)
+	mediumLimiter := middleware.NewIPRateLimiter(serverCtx, 0.083, 5)
+	standardLimiter := middleware.NewIPRateLimiter(serverCtx, 1, 10)
+	visionLimiter := middleware.NewIPRateLimiter(serverCtx, 0.0833, 3)
+	docLimiter := middleware.NewIPRateLimiter(serverCtx, 0.5, 10)
+
 	// Main Router
 	mainMux := http.NewServeMux()
 
@@ -82,30 +96,35 @@ func main() {
 	}
 
 	strictLimit := func(h http.HandlerFunc) http.Handler {
-		return middleware.RateLimitMiddleware(protected(h), 0.00055, 2)
+		return middleware.RateLimitMiddleware(strictLimiter, protected(h))
 	}
 
 	mediumLimit := func(h http.HandlerFunc) http.Handler {
-		return middleware.RateLimitMiddleware(protected(h), 0.083, 5)
+		return middleware.RateLimitMiddleware(mediumLimiter, protected(h))
 	}
 
 	standardLimit := func(h http.HandlerFunc) http.Handler {
-		return middleware.RateLimitMiddleware(protected(h), 1, 10)
+		return middleware.RateLimitMiddleware(standardLimiter, protected(h))
 	}
 
 	visionLimit := func(h http.HandlerFunc) http.Handler {
-		return middleware.RateLimitMiddleware(protected(h), 0.0833, 3)
+		return middleware.RateLimitMiddleware(visionLimiter, protected(h))
+	}
+
+	docLimit := func(h http.HandlerFunc) http.Handler {
+		return middleware.RateLimitMiddleware(docLimiter, protected(h))
 	}
 
 	// --- API ROUTES  ---
 
 	// Drivers & User
-	apiMux.Handle("POST /drivers/register", strictLimit(drivers.RegisterDriver))
+	apiMux.Handle("POST /drivers/register", strictLimit(drivers.RegisterDriver(cfg)))
 	if visionSvc != nil {
 		apiMux.Handle("POST /drivers/validate-photo", visionLimit(vision.ValidatePhoto(visionSvc)))
+		apiMux.Handle("POST /drivers/validate-document", docLimit(vision.ValidateDocument(visionSvc)))
 	}
 	apiMux.Handle("GET /user/dashboard", standardLimit(dashboard.GetMyDashboard))
-	apiMux.Handle("PUT /user/profile", mediumLimit(users.UpdateMyProfile))
+	apiMux.Handle("PUT /user/profile", mediumLimit(users.UpdateMyProfile(cfg)))
 	apiMux.Handle("GET /user/me", standardLimit(users.GetMe))
 
 	// Admin
@@ -131,15 +150,34 @@ func main() {
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       180 * time.Second, // 3 minutes per user request
+		ReadTimeout:       180 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 
 	slog.Info("Server configuration applied", "read_timeout", "180s", "write_timeout", "30s")
 
-	if err := server.ListenAndServe(); err != nil {
-		slog.Error("Server failed", "error", err)
-		os.Exit(1)
+	// Start server in background
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("Server failed", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Block until OS signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	slog.Info("Shutting down server gracefully...")
+	serverCancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Error("Server shutdown error", "error", err)
 	}
+	slog.Info("Server stopped")
 }

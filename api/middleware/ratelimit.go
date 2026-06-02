@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -9,63 +10,75 @@ import (
 	"golang.org/x/time/rate"
 )
 
+type limiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
 type IPRateLimiter struct {
-	ips map[string]*rate.Limiter
-	mu  *sync.RWMutex
-	r   rate.Limit
-	b   int
+	entries map[string]*limiterEntry
+	mu      sync.Mutex
+	r       rate.Limit
+	b       int
 }
 
-func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
-	i := &IPRateLimiter{
-		ips: make(map[string]*rate.Limiter),
-		mu:  &sync.RWMutex{},
-		r:   r,
-		b:   b,
+// NewIPRateLimiter creates a rate limiter. The cleanup goroutine runs until ctx is cancelled.
+func NewIPRateLimiter(ctx context.Context, r rate.Limit, b int) *IPRateLimiter {
+	rl := &IPRateLimiter{
+		entries: make(map[string]*limiterEntry),
+		r:       r,
+		b:       b,
 	}
-	go i.cleanup()
-
-	return i
+	go rl.cleanup(ctx)
+	return rl
 }
 
-func (i *IPRateLimiter) GetLimiter(key string) *rate.Limiter {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+func (rl *IPRateLimiter) GetLimiter(key string) *rate.Limiter {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
 
-	limiter, exists := i.ips[key]
+	e, exists := rl.entries[key]
 	if !exists {
-		limiter = rate.NewLimiter(i.r, i.b)
-		i.ips[key] = limiter
+		e = &limiterEntry{limiter: rate.NewLimiter(rl.r, rl.b)}
+		rl.entries[key] = e
 	}
-
-	return limiter
+	e.lastSeen = time.Now()
+	return e.limiter
 }
 
-func (i *IPRateLimiter) cleanup() {
+func (rl *IPRateLimiter) cleanup(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
 	for {
-		time.Sleep(1 * time.Hour)
-		i.mu.Lock()
-		slog.Info("Cleaning up rate limit map", "entries", len(i.ips))
-		i.ips = make(map[string]*rate.Limiter)
-		i.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			const ttl = time.Hour
+			for key, e := range rl.entries {
+				if time.Since(e.lastSeen) > ttl {
+					delete(rl.entries, key)
+				}
+			}
+			slog.Info("Rate limiter cleanup done", "remaining_entries", len(rl.entries))
+			rl.mu.Unlock()
+		}
 	}
 }
 
-func RateLimitMiddleware(next http.Handler, rps float64, burst int) http.Handler {
-	limiter := NewIPRateLimiter(rate.Limit(rps), burst)
-
+// RateLimitMiddleware applies the given limiter to each request, keyed by user ID or remote IP.
+func RateLimitMiddleware(limiter *IPRateLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
 		key := r.RemoteAddr
-
-		if userID, ok := r.Context().Value("user_id").(string); ok {
+		if userID, ok := r.Context().Value(ContextKeyUserID).(string); ok && userID != "" {
 			key = userID
 		}
 
-		l := limiter.GetLimiter(key)
-
-		if !l.Allow() {
+		if !limiter.GetLimiter(key).Allow() {
 			slog.Warn("Rate limit exceeded", "key", key, "path", r.URL.Path)
+			w.Header().Set("Retry-After", "60")
 			http.Error(w, "Too Many Requests - Rate Limit Exceeded", http.StatusTooManyRequests)
 			return
 		}

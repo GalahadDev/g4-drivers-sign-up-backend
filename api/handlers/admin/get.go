@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"g4-services/api/database"
+	"g4-services/api/domains"
 
 	"github.com/google/uuid"
 )
@@ -165,21 +166,21 @@ func GetUserDetail(w http.ResponseWriter, r *http.Request) {
 		app := &DriverApplicationDetail{
 			ID:                *appID,
 			UserID:            response.ID,
-			FullName:          getString(appFullName),
-			Address:           getString(appAddress),
-			PhoneNumber:       getString(appPhone),
-			EmergencyNumber:   getString(appEmergency),
-			DeviceType:        getString(appDevice),
-			DriverCategory:    getString(appCategory),
-			VehicleType:       getString(appVehicle),
+			FullName:          domains.GetString(appFullName),
+			Address:           domains.GetString(appAddress),
+			PhoneNumber:       domains.GetString(appPhone),
+			EmergencyNumber:   domains.GetString(appEmergency),
+			DeviceType:        domains.GetString(appDevice),
+			DriverCategory:    domains.GetString(appCategory),
+			VehicleType:       domains.GetString(appVehicle),
 			PassengerCapacity: getInt(appCapacity),
 
-			DriverLicenseURL:     getString(appLicense),
-			TLCLicenseURL:        getString(appTLC),
-			CarRegistrationURL:   getString(appCarReg),
-			VehicleInspectionURL: getString(appInspect),
-			TLCDiamondURL:        getString(appDiamond),
-			ProfilePhotoURL:      getString(appProfilePhoto),
+			DriverLicenseURL:     domains.GetString(appLicense),
+			TLCLicenseURL:        domains.GetString(appTLC),
+			CarRegistrationURL:   domains.GetString(appCarReg),
+			VehicleInspectionURL: domains.GetString(appInspect),
+			TLCDiamondURL:        domains.GetString(appDiamond),
+			ProfilePhotoURL:      domains.GetString(appProfilePhoto),
 
 			InsuranceFilesURLs: appInsurances,
 			VehiclePhotosURLs:  appVehPhotos,
@@ -200,12 +201,6 @@ func GetUserDetail(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func getString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
 func getInt(i *int) int {
 	if i == nil {
 		return 0
