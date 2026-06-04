@@ -300,7 +300,7 @@ func RegisterDriver(cfg *config.AppConfig) http.HandlerFunc {
 			Category:     driverCategory,
 			Phone:        phoneNumber,
 			RegisteredAt: time.Now(),
-			DashboardURL: "https://g4carservice.com/admin",
+			DashboardURL: "https://g4-drivers-sign-up-frontend.vercel.app/admin",
 		}
 		if err := email.SendEmail(
 			adminEmails,
