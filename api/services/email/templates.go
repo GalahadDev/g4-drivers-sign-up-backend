@@ -17,10 +17,10 @@ func WelcomeTemplate(fullName string) string {
     <div style="padding:30px;color:#333333;">
       <h2 style="color:#2E4A35;">Welcome, %s!</h2>
       <p>Thank you for registering with G4 Car Service.</p>
-      <p>Your application has been received and <strong>automatically approved</strong> as part of our initial launch.</p>
-      <p>You are now an active driver in our system.</p>
+      <p>Your application has been received and is currently being processed by our team.</p>
+      <p>We will reach out to you once the onboarding process is complete.</p>
       <div style="margin-top:30px;padding:15px;background-color:#f9f9f9;border-left:4px solid #D4AF37;">
-        <p style="margin:0;font-size:14px;color:#555;">Status: <strong style="color:#2E4A35;">Approved</strong></p>
+        <p style="margin:0;font-size:14px;color:#555;">Status: <strong style="color:#2E4A35;">Submitted</strong></p>
       </div>
     </div>
     <div style="background-color:#2E4A35;padding:15px;text-align:center;color:#D4AF37;font-size:12px;">
