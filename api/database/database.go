@@ -2,8 +2,8 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	"g4-services/api/config"
@@ -14,13 +14,14 @@ import (
 
 var Pool *pgxpool.Pool
 
-func InitDB(cfg *config.AppConfig) {
+// InitDB initializes the global connection pool. Returns an error instead of
+// calling os.Exit so the caller controls shutdown (audit M5, matches InitAuth).
+func InitDB(cfg *config.AppConfig) error {
 	dsn := cfg.DatabaseDSN()
 
 	pgConfig, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		slog.Error("Error parsing DB config", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("parsing DB config: %w", err)
 	}
 
 	pgConfig.ConnConfig.Tracer = &DBTracer{}
@@ -36,14 +37,13 @@ func InitDB(cfg *config.AppConfig) {
 
 	Pool, err = pgxpool.NewWithConfig(ctx, pgConfig)
 	if err != nil {
-		slog.Error("Unable to create connection pool", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("creating connection pool: %w", err)
 	}
 
 	if err := Pool.Ping(ctx); err != nil {
-		slog.Error("Database ping failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("database ping failed: %w", err)
 	}
 
 	slog.Info("Database connected successfully")
+	return nil
 }

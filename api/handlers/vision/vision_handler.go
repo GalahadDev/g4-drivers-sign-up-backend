@@ -74,7 +74,7 @@ func ValidatePhoto(svc *vision.VisionService) http.HandlerFunc {
 // DocValidationRequest is the JSON body for POST /drivers/validate-document.
 type DocValidationRequest struct {
 	DocType       string `json:"docType"`
-	File          string `json:"file"`          // base64, may include "data:<mime>;base64," prefix
+	File          string `json:"file"` // base64, may include "data:<mime>;base64," prefix
 	MimeType      string `json:"mimeType"`
 	ExpectedName  string `json:"expectedName"`
 	ExpectedPlate string `json:"expectedPlate"`

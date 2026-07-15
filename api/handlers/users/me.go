@@ -64,7 +64,11 @@ type DriverApplicationFull struct {
 // @Router       /user/me [get]
 // @Security     BearerAuth
 func GetMe(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(middleware.ContextKeyUserID).(string)
+	userID, ok := r.Context().Value(middleware.ContextKeyUserID).(string)
+	if !ok || userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	response := UserProfileResponse{}
 	sql := `
@@ -171,4 +175,3 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
-

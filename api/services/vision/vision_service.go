@@ -107,9 +107,13 @@ func (s *VisionService) ValidateFormalWear(ctx context.Context, imageContent []b
 	}
 	excludedTags := []string{"vehicle", "car", "motor vehicle"}
 
+	// If the image is dominated by vehicle labels, it's likely the wrong upload
+	// (a car photo instead of a formal headshot) — reject it.
 	for _, desc := range labelDescriptions {
 		for _, tag := range excludedTags {
 			if strings.EqualFold(desc, tag) {
+				slog.Info("Validation Failed: excluded (vehicle) tag detected", "tag", desc)
+				return false, labelDescriptions, nil
 			}
 		}
 	}

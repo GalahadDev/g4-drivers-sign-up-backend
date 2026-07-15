@@ -56,7 +56,11 @@ type ReferralItem struct {
 // @Router       /user/dashboard [get]
 // @Security     BearerAuth
 func GetMyDashboard(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(middleware.ContextKeyUserID).(string)
+	userID, ok := r.Context().Value(middleware.ContextKeyUserID).(string)
+	if !ok || userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	response := UserDashboard{}
 
 	pageStr := r.URL.Query().Get("page")

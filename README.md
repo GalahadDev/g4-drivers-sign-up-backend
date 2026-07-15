@@ -33,7 +33,7 @@ Backend service for the G4 Car Service driver registration platform. Built with 
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/GalahadDev/g4-drivers-sign-up-backend
+git clone https://github.com/g4recruitment/g4-drivers-sign-up-backend
 cd g4-drivers-sign-up
 ```
 
@@ -74,7 +74,7 @@ docker run -p 8080:8080 --env-file .env g4-app
 ## 📖 API Documentation
 
 Interactive API documentation (Swagger UI) is available at:
-`https://g4-sign-up-api.onrender.com/swagger/index.html`
+`https://g4-recruitment-api.onrender.com/swagger/index.html`
 
 Use this to explore endpoints, request formats, and test the API.
 

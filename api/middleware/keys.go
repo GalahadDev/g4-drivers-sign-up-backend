@@ -3,6 +3,6 @@ package middleware
 type contextKey int
 
 const (
-	ContextKeyUserID   contextKey = iota
+	ContextKeyUserID contextKey = iota
 	ContextKeyUserRole
 )

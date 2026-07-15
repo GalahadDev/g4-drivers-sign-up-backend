@@ -53,7 +53,10 @@ func main() {
 	}
 
 	// 3. Init DB & Auth
-	database.InitDB(cfg)
+	if err := database.InitDB(cfg); err != nil {
+		slog.Error("Failed to initialize database", "error", err)
+		os.Exit(1)
+	}
 	defer database.Pool.Close()
 
 	if err := middleware.InitAuth(cfg); err != nil {

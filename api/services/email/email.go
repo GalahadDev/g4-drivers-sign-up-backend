@@ -7,11 +7,16 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"g4-services/api/config"
 )
 
 const brevoEndpoint = "https://api.brevo.com/v3/smtp/email"
+
+// brevoClient has a bounded timeout so fire-and-forget email goroutines can't
+// leak if Brevo stops responding (audit A3).
+var brevoClient = &http.Client{Timeout: 15 * time.Second}
 
 type brevoRecipient struct {
 	Email string `json:"email"`
@@ -61,7 +66,7 @@ func SendEmail(to []string, subject string, bodyHTML string, cfg *config.AppConf
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("api-key", cfg.BrevoAPIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := brevoClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("email: request failed: %w", err)
 	}

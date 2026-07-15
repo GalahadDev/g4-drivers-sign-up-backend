@@ -8,9 +8,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// traceKey is an unexported type for context keys to avoid collisions (audit M3, staticcheck SA1029).
+type traceKey int
+
 const (
-	traceKeyStart = "pgx_query_start"
-	traceKeySQL   = "pgx_query_sql"
+	traceKeyStart traceKey = iota
+	traceKeySQL
 )
 
 type DBTracer struct{}
@@ -43,6 +46,7 @@ func (t *DBTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.Trac
 		attrs = append(attrs, slog.Any("error", data.Err))
 		slog.Error("SQL Query Failed", attrs...)
 	} else {
-		slog.Info("SQL Query Executed", attrs...)
+		// Debug level: per-query logging is noisy/costly in prod (audit M4).
+		slog.Debug("SQL Query Executed", attrs...)
 	}
 }

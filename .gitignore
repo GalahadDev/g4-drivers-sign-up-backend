@@ -1,0 +1,28 @@
+# === Secretos y credenciales (NO commitear) ===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Service account de Google Cloud Vision
+portfolio-logins-*.json
+*-service-account*.json
+
+# === Go ===
+g4-app
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# === Sistema / Editor ===
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

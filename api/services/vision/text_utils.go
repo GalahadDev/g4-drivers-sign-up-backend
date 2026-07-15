@@ -78,7 +78,7 @@ func normalizeNameText(s string) string {
 			b.WriteRune(' ') // compound names → separate tokens
 		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
 			b.WriteRune(' ')
-		// drop all other chars (commas, periods, digits in name context, etc.)
+			// drop all other chars (commas, periods, digits in name context, etc.)
 		}
 	}
 	return b.String()
